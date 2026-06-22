@@ -3,15 +3,21 @@ import { useEffect, useRef, useState } from "react";
 import { Manrope, Sora } from "next/font/google";
 import { useRouter } from "next/router";
 import {
+    addVirtualPlayerToRoom,
+    clearStoredValue,
     createRoom,
     formatRoomCode,
     getCurrentUser,
+    getActiveRoomForCurrentUser,
     getLobbyByCode,
+    isVirtualPlayer,
     kickPlayerFromRoom,
     leaveRoom,
+    readStoredJson,
     saveRoomDealerOrder,
     subscribeToRoom,
     syncRoomPlayerActivity,
+    writeStoredJson,
 } from "@/lib/supabase-browser";
 
 const headingFont = Sora({
@@ -38,6 +44,8 @@ const GAME_OPTIONS = [
         description: "Create a Baseball room.",
     },
 ];
+
+const LOBBY_CACHE_PREFIX = "game-scorer.lobby-cache.";
 
 function GameCard({
     imageSrc,
@@ -90,6 +98,8 @@ function getInitials(name) {
 }
 
 function PlayerCard({ player, isCurrentHost }) {
+    const isVirtual = isVirtualPlayer(player);
+
     return (
         <article
             className={`relative rounded-[26px] border bg-white p-6 shadow-[0_18px_45px_-28px_rgba(8,27,71,0.35)] ${isCurrentHost ? "border-[#d98d4c] shadow-[0_18px_45px_-28px_rgba(217,141,76,0.55)]" : "border-[#e9eef3]"}`}
@@ -108,7 +118,11 @@ function PlayerCard({ player, isCurrentHost }) {
                         {player.display_name}
                     </h3>
                     <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#1b5e58]">
-                        {isCurrentHost ? "Ready to play" : "Ready"}
+                        {isVirtual
+                            ? "Virtual player"
+                            : isCurrentHost
+                              ? "Ready to play"
+                              : "Ready"}
                     </p>
                 </div>
             </div>
@@ -170,10 +184,14 @@ function ManagePlayersModal({
     isOpen,
     isHost,
     players,
+    isAddingVirtualPlayer,
     kickingPlayerId,
+    onAddVirtualPlayer,
     onClose,
     onKickPlayer,
 }) {
+    const [virtualPlayerName, setVirtualPlayerName] = useState("");
+
     if (!isOpen || !isHost) {
         return null;
     }
@@ -211,8 +229,41 @@ function ManagePlayersModal({
                 </div>
 
                 <div className="mt-6 space-y-3">
+                    <div className="rounded-[22px] border border-dashed border-[#d6dde7] bg-[#fbfcfd] px-4 py-4">
+                        <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#50637f]">
+                            Add virtual player
+                        </p>
+                        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                            <input
+                                type="text"
+                                autoComplete="off"
+                                value={virtualPlayerName}
+                                onChange={(event) => setVirtualPlayerName(event.target.value)}
+                                placeholder="Player name"
+                                className="h-12 flex-1 rounded-[16px] border border-[#d6dde7] bg-white px-4 text-base font-bold text-[#203456] outline-none transition placeholder:text-[#8a98ad] focus:border-[#13aea9] focus:ring-4 focus:ring-[#13aea9]/15"
+                            />
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    const trimmedName = virtualPlayerName.trim();
+
+                                    if (!trimmedName) {
+                                        return;
+                                    }
+
+                                    await onAddVirtualPlayer(trimmedName);
+                                    setVirtualPlayerName("");
+                                }}
+                                disabled={isAddingVirtualPlayer}
+                                className="rounded-full bg-[#081b47] px-5 py-3 text-xs font-extrabold uppercase tracking-[0.18em] text-white transition hover:bg-[#10285f] disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {isAddingVirtualPlayer ? "Adding..." : "Add Player"}
+                            </button>
+                        </div>
+                    </div>
                     {players.map((player) => {
                         const isHostPlayer = player.role === "host";
+                        const isVirtual = isVirtualPlayer(player);
                         const isKicking = kickingPlayerId === player.user_id;
 
                         return (
@@ -225,7 +276,11 @@ function ManagePlayersModal({
                                         {player.display_name}
                                     </p>
                                     <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#50637f]">
-                                        {isHostPlayer ? "Host" : "Player"}
+                                        {isHostPlayer
+                                            ? "Host"
+                                            : isVirtual
+                                              ? "Virtual player"
+                                              : "Player"}
                                     </p>
                                 </div>
                                 {isHostPlayer ? (
@@ -239,7 +294,13 @@ function ManagePlayersModal({
                                         disabled={Boolean(kickingPlayerId)}
                                         className="rounded-full bg-[#8f2d2d] px-4 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-white transition hover:bg-[#7d2222] disabled:cursor-not-allowed disabled:opacity-60"
                                     >
-                                        {isKicking ? "Kicking..." : "Kick"}
+                                        {isKicking
+                                            ? isVirtual
+                                                ? "Removing..."
+                                                : "Kicking..."
+                                            : isVirtual
+                                              ? "Remove"
+                                              : "Kick"}
                                     </button>
                                 )}
                             </div>
@@ -320,7 +381,11 @@ function StartGameModal({
                                             {player.display_name}
                                         </p>
                                         <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#50637f]">
-                                            {player.role === "host" ? "Host" : "Player"}
+                                            {player.role === "host"
+                                                ? "Host"
+                                                : isVirtualPlayer(player)
+                                                  ? "Virtual player"
+                                                  : "Player"}
                                         </p>
                                     </div>
                                 </div>
@@ -368,9 +433,12 @@ function StartGameModal({
 function SelectionView({ hostName, isCreatingRoom, onCreateRoom }) {
     return (
         <main
-            className={`${bodyFont.className} min-h-screen bg-[#f4f7f5] px-6 py-10 text-[#081b47] sm:px-10`}
+            className={`${bodyFont.className} relative min-h-screen overflow-hidden bg-[#eef5f3] px-6 py-10 text-[#081b47] sm:px-10`}
         >
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,217,190,0.95),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(188,231,230,0.85),_transparent_32%),radial-gradient(circle_at_bottom_center,_rgba(255,255,255,0.9),_transparent_50%)]" />
+            <div className="pointer-events-none absolute left-[-7rem] top-[-7rem] h-64 w-64 rounded-full bg-[#ffd3b3]/70 blur-3xl" />
+            <div className="pointer-events-none absolute bottom-[-6rem] right-[-4rem] h-72 w-72 rounded-full bg-[#b8ece6]/60 blur-3xl" />
+            <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-8">
                 <header className="flex flex-col gap-3 rounded-[30px] border border-white/70 bg-white/70 p-6 shadow-[0_25px_60px_-30px_rgba(11,31,73,0.25)] backdrop-blur-xl sm:flex-row sm:items-end sm:justify-between">
                     <div className="space-y-2">
                         <p className="text-sm font-extrabold uppercase tracking-[0.32em] text-[#081b47]/45">
@@ -414,7 +482,9 @@ function RoomView({
     onLeaveLobby,
     isLeavingLobby,
     isManagePlayersOpen,
+    isAddingVirtualPlayer,
     onOpenManagePlayers,
+    onAddVirtualPlayer,
     onCloseManagePlayers,
     onKickPlayer,
     kickingPlayerId,
@@ -431,9 +501,12 @@ function RoomView({
 
     return (
         <main
-            className={`${bodyFont.className} min-h-screen bg-[#f7f7f5] px-2 py-6 text-[#081b47] sm:px-6 sm:py-8`}
+            className={`${bodyFont.className} relative min-h-screen overflow-hidden bg-[#eef5f3] px-4 py-6 text-[#081b47] sm:px-6 sm:py-8`}
         >
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,217,190,0.95),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(188,231,230,0.85),_transparent_32%),radial-gradient(circle_at_bottom_center,_rgba(255,255,255,0.9),_transparent_50%)]" />
+            <div className="pointer-events-none absolute left-[-7rem] top-[-7rem] h-64 w-64 rounded-full bg-[#ffd3b3]/70 blur-3xl" />
+            <div className="pointer-events-none absolute bottom-[-6rem] right-[-4rem] h-72 w-72 rounded-full bg-[#b8ece6]/60 blur-3xl" />
+            <div className="relative mx-auto flex w-full max-w-7xl flex-col gap-8 mb-10">
                 <div className="flex justify-center">
                     <div className="rounded-full bg-[#f7dcca] px-5 py-3 text-xs font-extrabold uppercase tracking-[0.22em] text-[#b5672f]">
                         Playing: {room.selected_game}
@@ -505,7 +578,9 @@ function RoomView({
                     isOpen={isManagePlayersOpen}
                     isHost={Boolean(isHost)}
                     players={players}
+                    isAddingVirtualPlayer={isAddingVirtualPlayer}
                     kickingPlayerId={kickingPlayerId}
+                    onAddVirtualPlayer={onAddVirtualPlayer}
                     onClose={onCloseManagePlayers}
                     onKickPlayer={onKickPlayer}
                 />
@@ -558,6 +633,18 @@ function removePlayerByUserId(players, userId) {
     );
 }
 
+function getGameUrl(gameName, roomId) {
+    return `/game/${encodeURIComponent(gameName)}/${roomId}`;
+}
+
+function redirectToGame(router, room) {
+    if (!room?.id || !room?.selected_game) {
+        return;
+    }
+
+    void router.push(getGameUrl(room.selected_game, room.id));
+}
+
 export default function LobbyPage() {
     const router = useRouter();
     const [hostName, setHostName] = useState("");
@@ -568,6 +655,7 @@ export default function LobbyPage() {
     const [isCopyingCode, setIsCopyingCode] = useState(false);
     const [isLeavingLobby, setIsLeavingLobby] = useState(false);
     const [isManagePlayersOpen, setIsManagePlayersOpen] = useState(false);
+    const [isAddingVirtualPlayer, setIsAddingVirtualPlayer] = useState(false);
     const [kickingPlayerId, setKickingPlayerId] = useState("");
     const [isStartGameOpen, setIsStartGameOpen] = useState(false);
     const [dealerOrderUserIds, setDealerOrderUserIds] = useState([]);
@@ -579,6 +667,7 @@ export default function LobbyPage() {
         typeof router.query.code === "string" ? router.query.code : "",
     );
     const isSelectionMode = router.query.mode === "select" && !roomCode;
+    const lobbyCacheKey = roomCode ? `${LOBBY_CACHE_PREFIX}${roomCode}` : "";
 
     useEffect(() => {
         currentUserIdRef.current = currentUserId;
@@ -623,6 +712,13 @@ export default function LobbyPage() {
             return;
         }
 
+        const cachedLobby = readStoredJson(lobbyCacheKey);
+
+        if (cachedLobby?.room?.room_code === roomCode && Array.isArray(cachedLobby?.players)) {
+            setRoomData(cachedLobby);
+            setStatus("");
+        }
+
         let isMounted = true;
 
         async function loadLobby() {
@@ -633,8 +729,18 @@ export default function LobbyPage() {
                     return;
                 }
 
+                if (lobby.room.status === "in_game") {
+                    redirectToGame(routerRef.current, lobby.room);
+                    return;
+                }
+
                 setRoomData(lobby);
                 setStatus("");
+
+                if (!currentUserIdRef.current) {
+                    return;
+                }
+
                 await syncRoomPlayerActivity(roomCode);
             } catch (error) {
                 if (!isMounted) {
@@ -646,7 +752,8 @@ export default function LobbyPage() {
                 setRoomData(null);
 
                 if (message === "Room not found.") {
-                    void router.replace("/");
+                    clearStoredValue(lobbyCacheKey);
+                    void routerRef.current.replace("/");
                 }
             }
         }
@@ -656,10 +763,51 @@ export default function LobbyPage() {
         return () => {
             isMounted = false;
         };
-    }, [isSelectionMode, roomCode, router]);
+    }, [currentUserId, isSelectionMode, lobbyCacheKey, roomCode]);
 
     useEffect(() => {
-        if (!roomData || isCurrentUserInRoom(roomData, currentUserId)) {
+        if (!lobbyCacheKey || !roomData?.room?.room_code) {
+            return;
+        }
+
+        writeStoredJson(lobbyCacheKey, roomData);
+    }, [lobbyCacheKey, roomData]);
+
+    useEffect(() => {
+        if (roomCode || !currentUserId) {
+            return;
+        }
+
+        let isMounted = true;
+
+        async function redirectActiveInGameRoom() {
+            try {
+                const activeRoom = await getActiveRoomForCurrentUser();
+
+                if (
+                    !isMounted ||
+                    activeRoom?.status !== "in_game" ||
+                    !activeRoom.id ||
+                    !activeRoom.selected_game
+                ) {
+                    return;
+                }
+
+                redirectToGame(routerRef.current, activeRoom);
+            } catch {
+                // Stay on lobby selection/no-room view if active-room lookup fails.
+            }
+        }
+
+        void redirectActiveInGameRoom();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [currentUserId, roomCode]);
+
+    useEffect(() => {
+        if (!currentUserId || !roomData || isCurrentUserInRoom(roomData, currentUserId)) {
             return;
         }
 
@@ -667,8 +815,9 @@ export default function LobbyPage() {
         setRoomData(null);
         setIsManagePlayersOpen(false);
         setIsStartGameOpen(false);
-        void router.replace("/");
-    }, [currentUserId, roomData, router]);
+        clearStoredValue(lobbyCacheKey);
+        void routerRef.current.replace("/");
+    }, [currentUserId, lobbyCacheKey, roomData?.players]);
 
     function handleRoomSubscriptionEvent(payload) {
         const activeUserId = currentUserIdRef.current;
@@ -676,6 +825,40 @@ export default function LobbyPage() {
 
         if (payload.sourceTable === "room_players") {
             if (payload.eventType === "DELETE") {
+                if (!payload.old?.user_id) {
+                    return;
+                }
+
+                if (payload.old.user_id === activeUserId) {
+                    setStatus("You were removed from the lobby.");
+                    setRoomData(null);
+                    setIsManagePlayersOpen(false);
+                    setIsStartGameOpen(false);
+                    clearStoredValue(lobbyCacheKey);
+                    void activeRouter.replace("/");
+                    return;
+                }
+
+                setRoomData((current) => {
+                    if (!current) {
+                        return current;
+                    }
+
+                    return {
+                        ...current,
+                        players: removePlayerByUserId(
+                            current.players,
+                            payload.old.user_id,
+                        ),
+                        room: {
+                            ...current.room,
+                            dealer_order: (current.room.dealer_order || []).filter(
+                                (userId) => userId !== payload.old.user_id,
+                            ),
+                        },
+                    };
+                });
+                setStatus("");
                 return;
             }
 
@@ -689,6 +872,7 @@ export default function LobbyPage() {
                     setRoomData(null);
                     setIsManagePlayersOpen(false);
                     setIsStartGameOpen(false);
+                    clearStoredValue(lobbyCacheKey);
                     void activeRouter.replace("/");
                     return;
                 }
@@ -732,11 +916,17 @@ export default function LobbyPage() {
             setRoomData(null);
             setIsManagePlayersOpen(false);
             setIsStartGameOpen(false);
+            clearStoredValue(lobbyCacheKey);
             void activeRouter.replace("/");
             return;
         }
 
         if (!payload.new) {
+            return;
+        }
+
+        if (payload.new.status === "in_game") {
+            redirectToGame(activeRouter, payload.new);
             return;
         }
 
@@ -845,6 +1035,7 @@ export default function LobbyPage() {
 
         try {
             await leaveRoom(roomCode);
+            clearStoredValue(lobbyCacheKey);
             await router.replace("/");
         } catch (error) {
             setStatus(error.message || "Unable to leave the lobby.");
@@ -886,6 +1077,33 @@ export default function LobbyPage() {
         }
     }
 
+    async function handleAddVirtualPlayer(displayName) {
+        if (!roomCode) {
+            return;
+        }
+
+        setIsAddingVirtualPlayer(true);
+
+        try {
+            const addedPlayer = await addVirtualPlayerToRoom(roomCode, displayName);
+            setRoomData((current) => {
+                if (!current || !addedPlayer) {
+                    return current;
+                }
+
+                return {
+                    ...current,
+                    players: upsertPlayer(current.players, addedPlayer),
+                };
+            });
+            setStatus(`Added virtual player ${displayName}.`);
+        } catch (error) {
+            setStatus(error.message || "Unable to add virtual player.");
+        } finally {
+            setIsAddingVirtualPlayer(false);
+        }
+    }
+
     function handleMoveDealer(fromIndex, toIndex) {
         setDealerOrderUserIds((currentOrder) => moveItem(currentOrder, fromIndex, toIndex));
     }
@@ -905,7 +1123,7 @@ export default function LobbyPage() {
         setIsSavingDealerOrder(true);
 
         try {
-            await saveRoomDealerOrder(roomCode, dealerOrderUserIds);
+            const savedRoom = await saveRoomDealerOrder(roomCode, dealerOrderUserIds);
             setRoomData((current) => {
                 if (!current) {
                     return current;
@@ -913,9 +1131,10 @@ export default function LobbyPage() {
 
                 return {
                     ...current,
-                    room: {
+                    room: savedRoom || {
                         ...current.room,
                         dealer_order: dealerOrderUserIds,
+                        current_dealer_user_id: dealerOrderUserIds[0],
                     },
                 };
             });
@@ -923,6 +1142,7 @@ export default function LobbyPage() {
                 `Dealer order set: ${orderedPlayers.map((player) => player.display_name).join(", ")}.`,
             );
             setIsStartGameOpen(false);
+            redirectToGame(router, savedRoom || roomData.room);
         } catch (error) {
             setStatus(error.message || "Unable to save dealer order.");
         } finally {
@@ -950,9 +1170,12 @@ export default function LobbyPage() {
     if (!roomData) {
         return (
             <main
-                className={`${bodyFont.className} flex min-h-screen items-center justify-center bg-[#f7f7f5] px-6 text-center text-[#081b47]`}
+                className={`${bodyFont.className} relative flex min-h-screen items-center justify-center overflow-hidden bg-[#eef5f3] px-6 text-center text-[#081b47]`}
             >
-                <div className="space-y-3">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,217,190,0.95),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(188,231,230,0.85),_transparent_32%),radial-gradient(circle_at_bottom_center,_rgba(255,255,255,0.9),_transparent_50%)]" />
+                <div className="pointer-events-none absolute left-[-7rem] top-[-7rem] h-64 w-64 rounded-full bg-[#ffd3b3]/70 blur-3xl" />
+                <div className="pointer-events-none absolute bottom-[-6rem] right-[-4rem] h-72 w-72 rounded-full bg-[#b8ece6]/60 blur-3xl" />
+                <div className="relative space-y-3">
                     <h1 className={`${headingFont.className} text-4xl font-extrabold`}>
                         Lobby
                     </h1>
@@ -974,7 +1197,9 @@ export default function LobbyPage() {
             onLeaveLobby={handleLeaveLobby}
             isLeavingLobby={isLeavingLobby}
             isManagePlayersOpen={isManagePlayersOpen}
+            isAddingVirtualPlayer={isAddingVirtualPlayer}
             onOpenManagePlayers={handleOpenManagePlayers}
+            onAddVirtualPlayer={handleAddVirtualPlayer}
             onCloseManagePlayers={handleCloseManagePlayers}
             onKickPlayer={handleKickPlayer}
             kickingPlayerId={kickingPlayerId}

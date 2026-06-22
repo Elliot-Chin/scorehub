@@ -3,12 +3,58 @@ import { createClient } from "@supabase/supabase-js";
 export const DISPLAY_NAME_STORAGE_KEY = "game-scorer.display-name";
 const LAST_ACTIVE_SYNC_KEY = "game-scorer.last-active-sync";
 const ACTIVITY_SYNC_INTERVAL_MS = 60 * 1000;
+const ROOM_ACTIVITY_SYNC_INTERVAL_MS = 15 * 1000;
 const ROOM_CODE_LENGTH = 4;
 
-let supabase;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 let authOperationQueue = Promise.resolve();
+
+function getStorageValue(key) {
+    if (typeof window === "undefined") {
+        return null;
+    }
+
+    try {
+        return window.localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+function setStorageValue(key, value) {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    try {
+        window.localStorage.setItem(key, value);
+    } catch {
+        // Storage can be unavailable in private mode or restricted webviews.
+    }
+}
+
+function removeStorageValue(key) {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    try {
+        window.localStorage.removeItem(key);
+    } catch {
+        // Storage can be unavailable in private mode or restricted webviews.
+    }
+}
+
+function hasIntervalElapsed(storageKey, intervalMs) {
+    const lastSyncedAt = Number(getStorageValue(storageKey));
+
+    if (!Number.isFinite(lastSyncedAt) || lastSyncedAt <= 0) {
+        return true;
+    }
+
+    return Date.now() - lastSyncedAt >= intervalMs;
+}
 
 function getMetadataDisplayName(user, displayName) {
     return displayName?.trim() || user?.user_metadata?.display_name || "";
@@ -31,25 +77,41 @@ function buildUserMetadata(user, displayName) {
 }
 
 function canSyncActivity(force) {
-    if (force || typeof window === "undefined") {
+    if (force) {
         return true;
     }
 
-    const lastSyncedAt = window.localStorage.getItem(LAST_ACTIVE_SYNC_KEY);
-
-    if (!lastSyncedAt) {
-        return true;
-    }
-
-    return Date.now() - Number(lastSyncedAt) >= ACTIVITY_SYNC_INTERVAL_MS;
+    return hasIntervalElapsed(LAST_ACTIVE_SYNC_KEY, ACTIVITY_SYNC_INTERVAL_MS);
 }
 
 function rememberActivitySync() {
-    if (typeof window === "undefined") {
+    setStorageValue(LAST_ACTIVE_SYNC_KEY, String(Date.now()));
+}
+
+function getRoomActivitySyncKey(roomCode, userId) {
+    return `game-scorer.room-active-sync.${roomCode}.${userId}`;
+}
+
+function canSyncRoomActivity(roomCode, userId) {
+    if (typeof window === "undefined" || !roomCode || !userId) {
+        return true;
+    }
+
+    return hasIntervalElapsed(
+        getRoomActivitySyncKey(roomCode, userId),
+        ROOM_ACTIVITY_SYNC_INTERVAL_MS,
+    );
+}
+
+function rememberRoomActivitySync(roomCode, userId) {
+    if (!roomCode || !userId) {
         return;
     }
 
-    window.localStorage.setItem(LAST_ACTIVE_SYNC_KEY, String(Date.now()));
+    setStorageValue(
+        getRoomActivitySyncKey(roomCode, userId),
+        String(Date.now()),
+    );
 }
 
 function buildRoomCode() {
@@ -88,13 +150,65 @@ function runSerializedAuthOperation(operation) {
     return queuedOperation;
 }
 
+function withSourceTable(sourceTable, callback) {
+    return (payload) => {
+        callback({
+            ...payload,
+            sourceTable,
+        });
+    };
+}
+
+function deletedRowMatchesRoom(payload, roomId) {
+    return !payload.old?.room_id || payload.old.room_id === roomId;
+}
+
+function isMissingColumnError(error, columnName) {
+    return (
+        error?.code === "42703" ||
+        error?.code === "PGRST204" ||
+        error?.message?.includes(`'${columnName}'`) ||
+        error?.message?.includes(`"${columnName}"`)
+    );
+}
+
+async function upsertRoomPlayer(row) {
+    const client = getSupabaseBrowserClient();
+    const { error } = await client.from("room_players").upsert(row, {
+        onConflict: "room_id,user_id",
+    });
+
+    if (
+        error &&
+        (isMissingColumnError(error, "is_active") ||
+            isMissingColumnError(error, "removed_at"))
+    ) {
+        const { is_active: _isActive, removed_at: _removedAt, ...legacyRow } = row;
+        const { error: legacyError } = await client
+            .from("room_players")
+            .upsert(legacyRow, {
+                onConflict: "room_id,user_id",
+            });
+
+        if (legacyError) {
+            throw legacyError;
+        }
+
+        return;
+    }
+
+    if (error) {
+        throw error;
+    }
+}
+
 export function getSupabaseBrowserClient() {
-    if (!supabase) {
+    if (!globalThis.__gameScorerSupabaseClient) {
         if (!supabaseUrl || !supabasePublishableKey) {
             throw new Error("Missing Supabase environment variables.");
         }
 
-        supabase = createClient(
+        globalThis.__gameScorerSupabaseClient = createClient(
             supabaseUrl,
             supabasePublishableKey,
             {
@@ -107,7 +221,7 @@ export function getSupabaseBrowserClient() {
         );
     }
 
-    return supabase;
+    return globalThis.__gameScorerSupabaseClient;
 }
 
 export async function getCurrentUser() {
@@ -251,24 +365,15 @@ export async function createRoom(selectedGame) {
             throw roomError;
         }
 
-        const { error: playerError } = await client.from("room_players").upsert(
-            {
-                room_id: room.id,
-                room_code: roomCode,
-                user_id: user.id,
-                display_name: displayName,
-                role: "host",
-                is_active: true,
-                removed_at: null,
-            },
-            {
-                onConflict: "room_id,user_id",
-            },
-        );
-
-        if (playerError) {
-            throw playerError;
-        }
+        await upsertRoomPlayer({
+            room_id: room.id,
+            room_code: roomCode,
+            user_id: user.id,
+            display_name: displayName,
+            role: "host",
+            is_active: true,
+            removed_at: null,
+        });
 
         return room;
     }
@@ -301,27 +406,59 @@ export async function joinRoomByCode(roomCodeInput) {
         throw new Error("Room not found.");
     }
 
-    const { error: playerError } = await client.from("room_players").upsert(
-        {
-            room_id: room.id,
-            room_code: room.room_code,
-            user_id: user.id,
-            display_name: displayName,
-            role: room.host_user_id === user.id ? "host" : "player",
-            last_active_at: new Date().toISOString(),
-            is_active: true,
-            removed_at: null,
-        },
-        {
-            onConflict: "room_id,user_id",
-        },
-    );
-
-    if (playerError) {
-        throw playerError;
-    }
+    await upsertRoomPlayer({
+        room_id: room.id,
+        room_code: room.room_code,
+        user_id: user.id,
+        display_name: displayName,
+        role: room.host_user_id === user.id ? "host" : "player",
+        last_active_at: new Date().toISOString(),
+        is_active: true,
+        removed_at: null,
+    });
 
     return room;
+}
+
+export async function addVirtualPlayerToRoom(roomCodeInput, displayNameInput) {
+    const client = getSupabaseBrowserClient();
+    const roomCode = normalizeRoomCode(roomCodeInput);
+    const displayName = displayNameInput.trim();
+
+    if (roomCode.length !== ROOM_CODE_LENGTH) {
+        throw new Error("Invalid room code.");
+    }
+
+    if (!displayName) {
+        throw new Error("Enter a virtual player name.");
+    }
+
+    const { data, error } = await client.rpc("add_virtual_player_to_room", {
+        p_room_code: roomCode,
+        p_display_name: displayName,
+    });
+
+    if (error) {
+        if (error.message === "room_not_found") {
+            throw new Error("Room not found.");
+        }
+
+        if (error.message === "forbidden") {
+            throw new Error("Only the host can add virtual players.");
+        }
+
+        if (error.message === "invalid_display_name") {
+            throw new Error("Enter a virtual player name.");
+        }
+
+        if (error.message === "game_already_started") {
+            throw new Error("Add virtual players before starting the game.");
+        }
+
+        throw error;
+    }
+
+    return data;
 }
 
 export async function getLobbyByCode(roomCodeInput) {
@@ -332,22 +469,66 @@ export async function getLobbyByCode(roomCodeInput) {
         throw new Error("Invalid room code.");
     }
 
-    const { data: room, error: roomError } = await client
+    let { data: room, error: roomError } = await client
         .from("rooms")
-        .select("id, room_code, selected_game, status, host_user_id, dealer_order")
+        .select("id, room_code, selected_game, status, host_user_id, dealer_order, current_dealer_user_id")
         .eq("room_code", roomCode)
         .single();
+
+    if (
+        roomError &&
+        (isMissingColumnError(roomError, "dealer_order") ||
+            isMissingColumnError(roomError, "current_dealer_user_id"))
+    ) {
+        const legacyRoomResult = await client
+            .from("rooms")
+            .select("id, room_code, selected_game, status, host_user_id")
+            .eq("room_code", roomCode)
+            .single();
+
+        room = legacyRoomResult.data
+            ? {
+                  ...legacyRoomResult.data,
+                  dealer_order: [],
+                  current_dealer_user_id: null,
+              }
+            : null;
+        roomError = legacyRoomResult.error;
+    }
 
     if (roomError) {
         throw new Error("Room not found.");
     }
 
-    const { data: players, error: playersError } = await client
+    let { data: players, error: playersError } = await client
         .from("room_players")
-        .select("id, user_id, display_name, role, joined_at, last_active_at, is_active, removed_at")
+        .select("id, user_id, display_name, role, joined_at, last_active_at, is_active, removed_at, is_virtual, created_by_user_id")
         .eq("room_id", room.id)
         .eq("is_active", true)
         .order("joined_at", { ascending: true });
+
+    if (
+        playersError &&
+        (isMissingColumnError(playersError, "is_active") ||
+            isMissingColumnError(playersError, "is_virtual") ||
+            isMissingColumnError(playersError, "created_by_user_id") ||
+            isMissingColumnError(playersError, "removed_at"))
+    ) {
+        const legacyPlayersResult = await client
+            .from("room_players")
+            .select("id, user_id, display_name, role, joined_at, last_active_at")
+            .eq("room_id", room.id)
+            .order("joined_at", { ascending: true });
+
+        players = (legacyPlayersResult.data || []).map((player) => ({
+            ...player,
+            is_active: true,
+            is_virtual: false,
+            created_by_user_id: null,
+            removed_at: null,
+        }));
+        playersError = legacyPlayersResult.error;
+    }
 
     if (playersError) {
         throw playersError;
@@ -367,34 +548,55 @@ export async function getActiveRoomForCurrentUser() {
         return null;
     }
 
-    const { data: playerRow, error: playerError } = await client
+    let { data: playerRows, error: playerError } = await client
         .from("room_players")
         .select("room_id, room_code")
         .eq("user_id", user.id)
         .eq("is_active", true)
         .order("joined_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(5);
+
+    if (playerError && isMissingColumnError(playerError, "is_active")) {
+        const legacyPlayerResult = await client
+            .from("room_players")
+            .select("room_id, room_code")
+            .eq("user_id", user.id)
+            .order("joined_at", { ascending: false })
+            .limit(5);
+
+        playerRows = legacyPlayerResult.data;
+        playerError = legacyPlayerResult.error;
+    }
 
     if (playerError) {
         throw playerError;
     }
 
-    if (!playerRow?.room_code) {
+    if (!playerRows?.length) {
         return null;
     }
 
-    const { data: room, error: roomError } = await client
-        .from("rooms")
-        .select("id, room_code, selected_game, status, host_user_id")
-        .eq("id", playerRow.room_id)
-        .maybeSingle();
+    for (const playerRow of playerRows) {
+        if (!playerRow?.room_id) {
+            continue;
+        }
 
-    if (roomError) {
-        throw roomError;
+        const { data: room, error: roomError } = await client
+            .from("rooms")
+            .select("id, room_code, selected_game, status, host_user_id")
+            .eq("id", playerRow.room_id)
+            .maybeSingle();
+
+        if (roomError) {
+            throw roomError;
+        }
+
+        if (room) {
+            return room;
+        }
     }
 
-    return room || null;
+    return null;
 }
 
 export async function syncRoomPlayerActivity(roomCodeInput) {
@@ -411,7 +613,11 @@ export async function syncRoomPlayerActivity(roomCodeInput) {
         return;
     }
 
-    await client
+    if (!canSyncRoomActivity(roomCode, user.id)) {
+        return;
+    }
+
+    const { error } = await client
         .from("room_players")
         .update({
             display_name: getRequiredUserDisplayName(user),
@@ -420,6 +626,25 @@ export async function syncRoomPlayerActivity(roomCodeInput) {
         .eq("room_code", roomCode)
         .eq("user_id", user.id)
         .eq("is_active", true);
+
+    if (error && isMissingColumnError(error, "is_active")) {
+        await client
+            .from("room_players")
+            .update({
+                display_name: getRequiredUserDisplayName(user),
+                last_active_at: new Date().toISOString(),
+            })
+            .eq("room_code", roomCode)
+            .eq("user_id", user.id);
+        rememberRoomActivitySync(roomCode, user.id);
+        return;
+    }
+
+    if (error) {
+        throw error;
+    }
+
+    rememberRoomActivitySync(roomCode, user.id);
 }
 
 export async function leaveRoom(roomCodeInput) {
@@ -503,20 +728,222 @@ export async function saveRoomDealerOrder(roomCodeInput, dealerOrderUserIds) {
     });
 
     if (error) {
+        if (error.message === "room_not_found") {
+            throw new Error("Room not found.");
+        }
+
+        if (error.message === "forbidden") {
+            throw new Error("Only the host can start the game.");
+        }
+
+        if (error.message === "invalid_dealer_order") {
+            throw new Error("Dealer order must include each current player exactly once.");
+        }
+
         throw error;
     }
 
-    if (data === "room_not_found") {
+    return data;
+}
+
+export async function getGameScoreboard(roomId) {
+    const client = getSupabaseBrowserClient();
+
+    if (!roomId) {
+        throw new Error("Missing room id.");
+    }
+
+    const { data: room, error: roomError } = await client
+        .from("rooms")
+        .select("id, room_code, selected_game, status, host_user_id, dealer_order, current_dealer_user_id")
+        .eq("id", roomId)
+        .single();
+
+    if (roomError) {
         throw new Error("Room not found.");
     }
 
-    if (data === "forbidden") {
-        throw new Error("Only the host can start the game.");
+    const { data: players, error: playersError } = await client
+        .from("room_players")
+        .select("id, user_id, display_name, role, joined_at, is_active, is_virtual, created_by_user_id")
+        .eq("room_id", room.id)
+        .eq("is_active", true)
+        .order("joined_at", { ascending: true });
+
+    if (playersError) {
+        throw playersError;
     }
 
-    if (data === "invalid_dealer_order") {
-        throw new Error("Dealer order must include each current player exactly once.");
+    const { data: scores, error: scoresError } = await client
+        .from("game_scores")
+        .select("id, room_id, user_id, score, updated_at")
+        .eq("room_id", room.id);
+
+    if (scoresError) {
+        throw scoresError;
     }
+
+    return {
+        room,
+        players: players || [],
+        scores: scores || [],
+    };
+}
+
+export async function savePlayerScore(roomId, playerUserId, score) {
+    const client = getSupabaseBrowserClient();
+
+    if (!roomId || !playerUserId) {
+        throw new Error("Missing score target.");
+    }
+
+    const nextScore = Number(score);
+
+    if (!Number.isFinite(nextScore)) {
+        throw new Error("Score must be a number.");
+    }
+
+    const { data, error } = await client
+        .from("game_scores")
+        .upsert(
+            {
+                room_id: roomId,
+                user_id: playerUserId,
+                score: Math.trunc(nextScore),
+                updated_at: new Date().toISOString(),
+            },
+            {
+                onConflict: "room_id,user_id",
+            },
+        )
+        .select("id, room_id, user_id, score, updated_at")
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return data;
+}
+
+export async function advanceRoomDealer(roomCodeInput) {
+    const client = getSupabaseBrowserClient();
+    const roomCode = normalizeRoomCode(roomCodeInput);
+
+    if (roomCode.length !== ROOM_CODE_LENGTH) {
+        throw new Error("Invalid room code.");
+    }
+
+    const { data, error } = await client.rpc("advance_room_dealer", {
+        p_room_code: roomCode,
+    });
+
+    if (error) {
+        if (error.message === "room_not_found") {
+            throw new Error("Room not found.");
+        }
+
+        if (error.message === "dealer_order_not_set") {
+            throw new Error("Dealer order is not set.");
+        }
+
+        if (error.message === "forbidden") {
+            throw new Error("Only active room players can advance the round.");
+        }
+
+        throw error;
+    }
+
+    return data;
+}
+
+export function subscribeToGame(roomId, onGameEvent, onStatusChange) {
+    const client = getSupabaseBrowserClient();
+    const channel = client
+        .channel(`game:${roomId}`)
+        .on(
+            "postgres_changes",
+            {
+                event: "UPDATE",
+                schema: "public",
+                table: "rooms",
+                filter: `id=eq.${roomId}`,
+            },
+            withSourceTable("rooms", onGameEvent),
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "DELETE",
+                schema: "public",
+                table: "rooms",
+            },
+            (payload) => {
+                if (payload.old?.id === roomId) {
+                    withSourceTable("rooms", onGameEvent)(payload);
+                }
+            },
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "UPDATE",
+                schema: "public",
+                table: "room_players",
+                filter: `room_id=eq.${roomId}`,
+            },
+            withSourceTable("room_players", onGameEvent),
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "INSERT",
+                schema: "public",
+                table: "room_players",
+                filter: `room_id=eq.${roomId}`,
+            },
+            withSourceTable("room_players", onGameEvent),
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "DELETE",
+                schema: "public",
+                table: "room_players",
+            },
+            (payload) => {
+                if (deletedRowMatchesRoom(payload, roomId)) {
+                    withSourceTable("room_players", onGameEvent)(payload);
+                }
+            },
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "INSERT",
+                schema: "public",
+                table: "game_scores",
+                filter: `room_id=eq.${roomId}`,
+            },
+            withSourceTable("game_scores", onGameEvent),
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "UPDATE",
+                schema: "public",
+                table: "game_scores",
+                filter: `room_id=eq.${roomId}`,
+            },
+            withSourceTable("game_scores", onGameEvent),
+        )
+        .subscribe((status) => {
+            onStatusChange?.(status);
+        });
+
+    return () => {
+        void client.removeChannel(channel);
+    };
 }
 
 export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
@@ -531,12 +958,7 @@ export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
                 table: "rooms",
                 filter: `id=eq.${roomId}`,
             },
-            (payload) => {
-                onRoomEvent({
-                    ...payload,
-                    sourceTable: "rooms",
-                });
-            },
+            withSourceTable("rooms", onRoomEvent),
         )
         .on(
             "postgres_changes",
@@ -547,10 +969,7 @@ export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
             },
             (payload) => {
                 if (payload.old?.id === roomId) {
-                    onRoomEvent({
-                        ...payload,
-                        sourceTable: "rooms",
-                    });
+                    withSourceTable("rooms", onRoomEvent)(payload);
                 }
             },
         )
@@ -562,12 +981,7 @@ export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
                 table: "room_players",
                 filter: `room_id=eq.${roomId}`,
             },
-            (payload) => {
-                onRoomEvent({
-                    ...payload,
-                    sourceTable: "room_players",
-                });
-            },
+            withSourceTable("room_players", onRoomEvent),
         )
         .on(
             "postgres_changes",
@@ -577,12 +991,7 @@ export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
                 table: "room_players",
                 filter: `room_id=eq.${roomId}`,
             },
-            (payload) => {
-                onRoomEvent({
-                    ...payload,
-                    sourceTable: "room_players",
-                });
-            },
+            withSourceTable("room_players", onRoomEvent),
         )
         .on(
             "postgres_changes",
@@ -592,11 +1001,8 @@ export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
                 table: "room_players",
             },
             (payload) => {
-                if ((payload.old?.room_id || payload.new?.room_id) === roomId) {
-                    onRoomEvent({
-                        ...payload,
-                        sourceTable: "room_players",
-                    });
+                if (deletedRowMatchesRoom(payload, roomId)) {
+                    withSourceTable("room_players", onRoomEvent)(payload);
                 }
             },
         )
@@ -611,4 +1017,34 @@ export function subscribeToRoom(roomId, onRoomEvent, onStatusChange) {
 
 export function formatRoomCode(roomCodeInput) {
     return normalizeRoomCode(roomCodeInput);
+}
+
+export function isVirtualPlayer(player) {
+    return Boolean(player?.is_virtual);
+}
+
+export function readStoredJson(key) {
+    const value = getStorageValue(key);
+
+    if (!value) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+}
+
+export function writeStoredJson(key, value) {
+    try {
+        setStorageValue(key, JSON.stringify(value));
+    } catch {
+        // Ignore serialization/storage failures.
+    }
+}
+
+export function clearStoredValue(key) {
+    removeStorageValue(key);
 }

@@ -101,6 +101,10 @@ function formatStatus(user, displayName) {
     return `Signed in as ${resolvedName}.`;
 }
 
+function getGameUrl(gameName, roomId) {
+    return `/game/${encodeURIComponent(gameName)}/${roomId}`;
+}
+
 export default function Home() {
     const router = useRouter();
     const [displayName, setDisplayName] = useState("");
@@ -139,6 +143,26 @@ export default function Home() {
                 setSessionUser(user);
                 setStatus(formatStatus(user, resolvedName));
 
+                if (user) {
+                    const activeRoom = await getActiveRoomForCurrentUser();
+
+                    if (!isMounted) {
+                        return;
+                    }
+
+                    if (activeRoom?.status === "in_game") {
+                        await router.replace(
+                            getGameUrl(activeRoom.selected_game, activeRoom.id),
+                        );
+                        return;
+                    }
+
+                    if (activeRoom?.room_code) {
+                        await router.replace(`/lobby?code=${activeRoom.room_code}`);
+                        return;
+                    }
+                }
+
                 if (user && resolvedName) {
                     const syncResult = await syncAnonymousActivity(resolvedName);
 
@@ -148,16 +172,6 @@ export default function Home() {
 
                     setSessionUser(syncResult.user);
                     setStatus(formatStatus(syncResult.user, resolvedName));
-                }
-
-                if (user) {
-                    const activeRoom = await getActiveRoomForCurrentUser();
-
-                    if (!isMounted || !activeRoom?.room_code) {
-                        return;
-                    }
-
-                    await router.replace(`/lobby?code=${activeRoom.room_code}`);
                 }
             } catch (error) {
                 if (isMounted) {
@@ -259,6 +273,7 @@ export default function Home() {
                                 id="display-name"
                                 name="display-name"
                                 type="text"
+                                autoComplete="off"
                                 maxLength={32}
                                 value={displayName}
                                 onChange={(event) => setDisplayName(event.target.value)}
@@ -271,6 +286,7 @@ export default function Home() {
                                 id="room-code"
                                 name="room-code"
                                 type="text"
+                                autoComplete="off"
                                 inputMode="text"
                                 maxLength={4}
                                 value={roomCode}
