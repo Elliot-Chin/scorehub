@@ -65,6 +65,27 @@ function JoinRoomIcon() {
     );
 }
 
+function CalculatorIcon() {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-8 w-8"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <rect x="5" y="3.5" width="14" height="17" rx="3" fill="rgba(255,255,255,0.95)" />
+            <rect x="8" y="6.5" width="8" height="3" rx="1.2" fill="#0B1F49" opacity="0.18" />
+            <path
+                d="M8.5 13h.01M12 13h.01M15.5 13h.01M8.5 16.5h.01M12 16.5h.01M15.5 16.5h.01"
+                stroke="#FF8B3D"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+}
+
 function ActionCard({
     title,
     bgClass,
@@ -191,6 +212,20 @@ export default function Home() {
         const trimmedDisplayName = displayName.trim();
         const trimmedRoomCode = formatRoomCode(roomCode);
 
+        if (actionLabel === "calculator") {
+            setIsWorking(true);
+            setActiveAction(actionLabel);
+
+            try {
+                await router.push("/calculator");
+            } finally {
+                setIsWorking(false);
+                setActiveAction("");
+            }
+
+            return;
+        }
+
         if (!trimmedDisplayName) {
             setStatus("Enter a display name before starting.");
             return;
@@ -305,7 +340,7 @@ export default function Home() {
                         )}
                     </div>
 
-                    <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-2 sm:gap-6">
+                    <div className="grid w-full max-w-4xl gap-4 sm:grid-cols-2 lg:grid-cols-3 sm:gap-6">
                         <ActionCard
                             title="New Room"
                             bgClass="bg-[#ff9347]"
@@ -326,6 +361,17 @@ export default function Home() {
                             onClick={() => handleRoomAction("join")}
                         >
                             <JoinRoomIcon />
+                        </ActionCard>
+
+                        <ActionCard
+                            title="Calculator"
+                            bgClass="bg-[#081b47]"
+                            shadowClass="shadow-[0_22px_45px_-20px_rgba(8,27,71,0.72)]"
+                            disabled={isWorking}
+                            isLoading={activeAction === "calculator"}
+                            onClick={() => handleRoomAction("calculator")}
+                        >
+                            <CalculatorIcon />
                         </ActionCard>
                     </div>
 

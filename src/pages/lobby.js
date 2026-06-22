@@ -19,6 +19,7 @@ import {
     syncRoomPlayerActivity,
     writeStoredJson,
 } from "@/lib/supabase-browser";
+import { GAME_OPTIONS } from "@/lib/game-options";
 
 const headingFont = Sora({
     subsets: ["latin"],
@@ -29,21 +30,6 @@ const bodyFont = Manrope({
     subsets: ["latin"],
     weight: ["500", "700", "800"],
 });
-
-const GAME_OPTIONS = [
-    {
-        key: "Black Bitch",
-        imageSrc: "/BlackBitch/BB_Cover.png",
-        imageAlt: "Black Bitch cover",
-        description: "Create a Black Bitch room.",
-    },
-    {
-        key: "Baseball",
-        imageSrc: "/baseball/Baseball_Cover.png",
-        imageAlt: "Baseball cover",
-        description: "Create a Baseball room.",
-    },
-];
 
 const LOBBY_CACHE_PREFIX = "game-scorer.lobby-cache.";
 
