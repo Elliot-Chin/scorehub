@@ -222,6 +222,7 @@ function renderRankIcon(card, style) {
                 </>
             );
         case "BB":
+        case "BW":
             return (
                 <>
                     <path
