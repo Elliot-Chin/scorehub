@@ -14,6 +14,8 @@ import {
     subscribeToGame,
     writeStoredJson,
 } from "@/lib/supabase-browser";
+import { GameCalculator, supportsCalculatorGame } from "@/components/game-calculator";
+import { toGameSlug } from "@/lib/game-options";
 
 const headingFont = Sora({
     subsets: ["latin"],
@@ -87,19 +89,51 @@ function parseScoreDelta(value) {
     return nextScore;
 }
 
-function ScoreCard({ isDealer, isSaving, onAddScore, onResetScore, player, score }) {
+function CalculatorIcon() {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-7 w-7"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <rect x="4.5" y="3.5" width="15" height="17" rx="3.5" fill="#13AEA9" opacity="0.14" />
+            <rect x="7.5" y="6.5" width="9" height="3" rx="1.5" fill="#157D79" />
+            <circle cx="9" cy="13" r="1.2" fill="#157D79" />
+            <circle cx="12" cy="13" r="1.2" fill="#157D79" />
+            <circle cx="15" cy="13" r="1.2" fill="#157D79" />
+            <circle cx="9" cy="16.5" r="1.2" fill="#157D79" />
+            <circle cx="12" cy="16.5" r="1.2" fill="#157D79" />
+            <circle cx="15" cy="16.5" r="1.2" fill="#157D79" />
+        </svg>
+    );
+}
+
+function ScoreCard({
+    isDealer,
+    isSaving,
+    onAddScore,
+    onOpenCalculator,
+    onResetScore,
+    player,
+    score,
+    showCalculatorButton,
+}) {
     const [draftScore, setDraftScore] = useState("0");
     const [hasUserEditedScore, setHasUserEditedScore] = useState(false);
     const isVirtual = isVirtualPlayer(player);
 
     return (
-        <article className="rounded-[8px] border border-[#d6dde7] bg-white p-5 shadow-[0_18px_45px_-34px_rgba(8,27,71,0.35)]">
-            <div className="flex items-start justify-between gap-4">
+        <article className="relative overflow-hidden rounded-[28px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,251,250,0.92))] p-5 shadow-[0_28px_60px_-36px_rgba(8,27,71,0.42)]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_left,rgba(255,211,179,0.48),transparent_58%),radial-gradient(circle_at_top_right,rgba(184,236,230,0.42),transparent_52%)]" />
+
+            <div className="relative flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                    <p className="truncate text-xl font-extrabold text-[#203456]">
+                    <p className="truncate text-[1.45rem] font-extrabold tracking-[-0.04em] text-[#203456]">
                         {player.display_name}
                     </p>
-                    <p className="mt-1 text-xs font-extrabold uppercase tracking-[0.16em] text-[#50637f]">
+                    <p className="mt-2 text-[11px] font-extrabold uppercase tracking-[0.24em] text-[#50637f]">
                         {isDealer
                             ? "Current Dealer"
                             : isVirtual
@@ -107,17 +141,19 @@ function ScoreCard({ isDealer, isSaving, onAddScore, onResetScore, player, score
                               : player.role}
                     </p>
                 </div>
-                <div className="rounded-[8px] bg-[#f7dcca] px-3 py-2 text-xs font-extrabold uppercase tracking-[0.14em] text-[#9b5724]">
+                <div className="rounded-full bg-[#f7dcca] px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9b5724] shadow-[0_14px_28px_-22px_rgba(155,87,36,0.9)]">
                     {isDealer ? "Dealer" : isVirtual ? "Virtual" : "Player"}
                 </div>
             </div>
 
-            <div className="mt-6 grid gap-3">
-                <div className="rounded-[8px] bg-[#fbfcfd] px-4 py-4 text-center">
-                    <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#50637f]">
+            <div className="relative mt-6 grid gap-4">
+                <div className="rounded-[24px] border border-white/80 bg-white/82 px-4 py-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_36px_-28px_rgba(8,27,71,0.24)]">
+                    <p className="text-[11px] font-extrabold uppercase tracking-[0.28em] text-[#50637f]">
                         Total Score
                     </p>
-                    <p className="mt-2 text-4xl font-extrabold text-[#081b47]">{score}</p>
+                    <p className="mt-3 text-5xl font-extrabold tracking-[-0.06em] text-[#081b47]">
+                        {score}
+                    </p>
                 </div>
                 <input
                     type="text"
@@ -133,17 +169,19 @@ function ScoreCard({ isDealer, isSaving, onAddScore, onResetScore, player, score
                     }}
                     placeholder="0"
                     autoComplete="off"
-                    className="h-14 min-w-0 rounded-[8px] border border-[#d6dde7] bg-[#fbfcfd] px-4 text-center text-3xl font-extrabold text-[#081b47] outline-none focus:border-[#13aea9] focus:ring-4 focus:ring-[#13aea9]/15"
+                    className="h-16 min-w-0 rounded-[20px] border border-[#d6dde7]/80 bg-white/88 px-4 text-center text-4xl font-extrabold tracking-[-0.04em] text-[#081b47] outline-none transition focus:border-[#13aea9] focus:ring-4 focus:ring-[#13aea9]/15"
                     aria-label={`${player.display_name} score to add`}
                 />
-                <div className="grid grid-cols-2 gap-3">
+                <div
+                    className={`grid gap-3 ${showCalculatorButton ? "grid-cols-3" : "grid-cols-2"}`}
+                >
                     <button
                         type="button"
                         onClick={() => {
                             onResetScore(player.user_id);
                         }}
                         disabled={isSaving}
-                        className="h-11 rounded-[8px] border border-[#d6dde7] bg-white text-sm font-extrabold uppercase tracking-[0.16em] text-[#50637f] transition hover:bg-[#f7f9fb] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-12 rounded-[18px] border border-[#d6dde7]/85 bg-white/92 text-sm font-extrabold uppercase tracking-[0.18em] text-[#50637f] transition hover:-translate-y-0.5 hover:bg-[#f7f9fb] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         Reset
                     </button>
@@ -161,10 +199,25 @@ function ScoreCard({ isDealer, isSaving, onAddScore, onResetScore, player, score
                             setHasUserEditedScore(false);
                         }}
                         disabled={isSaving}
-                        className="h-11 rounded-[8px] bg-[#081b47] text-sm font-extrabold uppercase tracking-[0.16em] text-white transition hover:bg-[#10285f] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-12 rounded-[18px] bg-[#081b47] text-sm font-extrabold uppercase tracking-[0.18em] text-white shadow-[0_18px_34px_-22px_rgba(8,27,71,0.9)] transition hover:-translate-y-0.5 hover:bg-[#10285f] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         Add
                     </button>
+                    {showCalculatorButton ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                onOpenCalculator(player);
+                            }}
+                            disabled={isSaving}
+                            aria-label={`Open calculator for ${player.display_name}`}
+                            className="h-12 rounded-[18px] border border-[#13aea9]/22 bg-[linear-gradient(180deg,#f1fffd,#e1f8f4)] text-sm font-extrabold uppercase tracking-[0.18em] text-[#157d79] shadow-[0_16px_30px_-24px_rgba(19,174,169,0.9)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(180deg,#ebfffc,#d8f6f0)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <span className="flex h-full items-center justify-center">
+                                <CalculatorIcon />
+                            </span>
+                        </button>
+                    ) : null}
                 </div>
             </div>
         </article>
@@ -181,13 +234,16 @@ export default function GamePage() {
     const [isLeavingGame, setIsLeavingGame] = useState(false);
     const [savingUserId, setSavingUserId] = useState("");
     const [isAdvancingRound, setIsAdvancingRound] = useState(false);
+    const [calculatorPlayer, setCalculatorPlayer] = useState(null);
 
     const roomId = typeof router.query.roomId === "string" ? router.query.roomId : "";
     const gameName =
         typeof router.query.gameName === "string"
             ? decodeURIComponent(router.query.gameName)
             : "";
+    const gameSlug = toGameSlug(gameName);
     const gameCacheKey = roomId ? `${GAME_CACHE_PREFIX}${roomId}` : "";
+    const showCalculatorButton = supportsCalculatorGame(gameSlug);
 
     useEffect(() => {
         routerRef.current = router;
@@ -442,6 +498,11 @@ export default function GamePage() {
         void persistScore(playerUserId, 0);
     }
 
+    function handleCalculatorAdd(playerUserId, calculatedScore) {
+        void handleSetScore(playerUserId, calculatedScore);
+        setCalculatorPlayer(null);
+    }
+
     async function handleNextRound() {
         if (!scoreboard?.room?.room_code) {
             return;
@@ -570,13 +631,46 @@ export default function GamePage() {
                                 }
                                 isSaving={savingUserId === player.user_id}
                                 onAddScore={handleSetScore}
+                                onOpenCalculator={setCalculatorPlayer}
                                 onResetScore={handleResetScore}
                                 player={player}
                                 score={score}
+                                showCalculatorButton={showCalculatorButton}
                             />
                         );
                     })}
                 </section>
+
+                {calculatorPlayer ? (
+                    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#081b47]/38 px-4 py-6 backdrop-blur-sm">
+                        <div className="mx-auto w-full max-w-7xl">
+                            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <p className="rounded-full bg-white/82 px-5 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-[#081b47] shadow-[0_20px_45px_-32px_rgba(11,31,73,0.35)]">
+                                    Calculator for {calculatorPlayer.display_name}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => setCalculatorPlayer(null)}
+                                    className="rounded-full bg-[#081b47] px-5 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-white transition hover:bg-[#10285f]"
+                                >
+                                    Close Calculator
+                                </button>
+                            </div>
+                            <div className="rounded-[32px]">
+                                <GameCalculator
+                                    gameName={gameSlug}
+                                    hideBackLink
+                                    onApplyScore={(calculatedScore) =>
+                                        handleCalculatorAdd(
+                                            calculatorPlayer.user_id,
+                                            calculatedScore,
+                                        )
+                                    }
+                                />
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
 
                 {savingUserId ? (
                     <p className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-[8px] bg-[#081b47] px-4 py-2 text-sm font-extrabold text-white">

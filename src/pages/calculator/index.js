@@ -18,8 +18,10 @@ const CALCULATOR_OPTIONS = GAME_OPTIONS.map((game) => ({
     description:
         game.key === "Black Bitch"
             ? "Open the Black Bitch calculator."
-            : `${game.key} calculator coming soon.`,
-    isAvailable: game.key === "Black Bitch",
+            : game.key === "Baseball"
+              ? "Open the Baseball column calculator."
+              : `${game.key} calculator coming soon.`,
+    isAvailable: ["Black Bitch", "Baseball"].includes(game.key),
 }));
 
 function GameCard({ game, onClick }) {
@@ -72,7 +74,7 @@ export default function CalculatorSelectorPage() {
             <div className="pointer-events-none absolute left-[-7rem] top-[-7rem] h-64 w-64 rounded-full bg-[#ffd3b3]/70 blur-3xl" />
             <div className="pointer-events-none absolute bottom-[-6rem] right-[-4rem] h-72 w-72 rounded-full bg-[#b8ece6]/60 blur-3xl" />
 
-            <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-8">
+            <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-8 mb-10">
                 <header className="flex flex-col gap-3 rounded-[30px] border border-white/70 bg-white/70 p-6 shadow-[0_25px_60px_-30px_rgba(11,31,73,0.25)] backdrop-blur-xl sm:flex-row sm:items-end sm:justify-between">
                     <div className="space-y-2">
                         <p className="text-sm font-extrabold uppercase tracking-[0.32em] text-[#081b47]/45">
