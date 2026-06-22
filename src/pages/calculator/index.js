@@ -16,12 +16,12 @@ const bodyFont = Manrope({
 const CALCULATOR_OPTIONS = GAME_OPTIONS.map((game) => ({
     ...game,
     description:
-        game.key === "Black Bitch"
-            ? "Open the Black Bitch calculator."
+        game.key === "Black Witch"
+            ? "Open the Black Witch calculator."
             : game.key === "Baseball"
               ? "Open the Baseball column calculator."
               : `${game.key} calculator coming soon.`,
-    isAvailable: ["Black Bitch", "Baseball"].includes(game.key),
+    isAvailable: ["Black Witch", "Baseball"].includes(game.key),
 }));
 
 function GameCard({ game, onClick }) {

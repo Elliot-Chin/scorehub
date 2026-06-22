@@ -1,13 +1,13 @@
 export const GAME_OPTIONS = [
     {
-        key: "Black Bitch",
+        key: "Black Witch",
         imageSrc: "/BlackBitch/BB_Cover.png",
-        imageAlt: "Black Bitch cover",
-        description: "Create a Black Bitch room.",
+        imageAlt: "Black Witch cover",
+        description: "Create a Black Witch room.",
     },
     {
         key: "Baseball",
-        imageSrc: "/baseball/Baseball_Cover.png",
+        imageSrc: "/Baseball/Baseball_Cover.png",
         imageAlt: "Baseball cover",
         description: "Create a Baseball room.",
     },

@@ -26,7 +26,7 @@ const BLACK_BITCH_CARDS = [
     { id: "rank-J", label: "Jack", rank: "J", points: 10, tone: "sky" },
     { id: "rank-Q", label: "Queen", rank: "Q", points: 10, tone: "sky" },
     { id: "rank-K", label: "King", rank: "K", points: 10, tone: "sky" },
-    { id: "black-bitch", label: "Black Bitch", rank: "BB", points: 100, tone: "navy" },
+    { id: "black-bitch", label: "Black Witch", rank: "BW", points: 100, tone: "navy" },
     { id: "joker", label: "Joker", rank: "Joker", points: 50, tone: "gold" },
 ];
 
@@ -387,7 +387,7 @@ function UnsupportedCalculator({ gameName }) {
                     {gameName || "This game"} is not ready yet.
                 </h1>
                 <p className="mt-4 text-base font-bold text-[#0b1f49]/65">
-                    Only the Black Bitch and Baseball calculators are active right now.
+                    Only the Black Witch and Baseball calculators are active right now.
                 </p>
                 <div className="mt-8 flex justify-center">
                     <Link
@@ -464,8 +464,8 @@ function BlackBitchCalculator({ hideBackLink = false, onApplyScore = null }) {
     return (
         <CalculatorShell
             hideBackLink={hideBackLink}
-            title="Black Bitch"
-            description="Tap any card to add its score. Standard cards ignore suit. Only Black Bitch and Joker are special."
+            title="Black Witch"
+            description="Tap any card to add its score. Standard cards ignore suit. Only Black Witch and Joker are special."
             controls={
                 <>
                     <button
@@ -505,7 +505,7 @@ function BlackBitchCalculator({ hideBackLink = false, onApplyScore = null }) {
                     </div>
                     <div className="mt-4 rounded-[24px] bg-[#f7f9fb] p-4 text-sm font-bold text-[#50637f]">
                         Ace is 15. Two is 20. Three through nine are 5. Ten, Jack, Queen, and
-                        King are 10. Black Bitch is 100. Joker is 50.
+                        King are 10. Black Witch is 100. Joker is 50.
                     </div>
                 </>
             }
@@ -703,7 +703,7 @@ export function supportsCalculatorGame(gameName) {
         .replaceAll(/[^a-z0-9]+/g, "-")
         .replaceAll(/^-+|-+$/g, "");
 
-    return ["black-bitch", "baseball"].includes(normalizedGameName);
+    return ["black-witch", "black-bitch", "baseball"].includes(normalizedGameName);
 }
 
 export function GameCalculator({ gameName, hideBackLink = false, onApplyScore = null }) {
@@ -713,7 +713,7 @@ export function GameCalculator({ gameName, hideBackLink = false, onApplyScore = 
         .replaceAll(/[^a-z0-9]+/g, "-")
         .replaceAll(/^-+|-+$/g, "");
 
-    if (gameSlug === "black-bitch") {
+    if (gameSlug === "black-witch" || gameSlug === "black-bitch") {
         return (
             <BlackBitchCalculator
                 hideBackLink={hideBackLink}

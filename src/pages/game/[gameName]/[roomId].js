@@ -110,6 +110,52 @@ function CalculatorIcon() {
     );
 }
 
+function ResetIcon() {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <path
+                d="M7 7V3.5M7 3.5H3.5M7 3.5L4.5 6"
+                stroke="#50637F"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+            <path
+                d="M7.5 6.5C8.7 5.55 10.2 5 11.85 5C15.8 5 19 8.2 19 12.15C19 16.1 15.8 19.3 11.85 19.3C8.65 19.3 5.95 17.2 5.05 14.3"
+                stroke="#50637F"
+                strokeWidth="2"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+}
+
+function AddIcon() {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <circle cx="12" cy="12" r="8.5" fill="rgba(255,255,255,0.12)" />
+            <path
+                d="M12 8V16M8 12H16"
+                stroke="white"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+}
+
 function ScoreCard({
     isDealer,
     isSaving,
@@ -181,9 +227,12 @@ function ScoreCard({
                             onResetScore(player.user_id);
                         }}
                         disabled={isSaving}
+                        aria-label={`Reset ${player.display_name} score`}
                         className="h-12 rounded-[18px] border border-[#d6dde7]/85 bg-white/92 text-sm font-extrabold uppercase tracking-[0.18em] text-[#50637f] transition hover:-translate-y-0.5 hover:bg-[#f7f9fb] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        Reset
+                        <span className="flex h-full items-center justify-center">
+                            <ResetIcon />
+                        </span>
                     </button>
                     <button
                         type="button"
@@ -199,9 +248,12 @@ function ScoreCard({
                             setHasUserEditedScore(false);
                         }}
                         disabled={isSaving}
+                        aria-label={`Add score to ${player.display_name}`}
                         className="h-12 rounded-[18px] bg-[#081b47] text-sm font-extrabold uppercase tracking-[0.18em] text-white shadow-[0_18px_34px_-22px_rgba(8,27,71,0.9)] transition hover:-translate-y-0.5 hover:bg-[#10285f] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        Add
+                        <span className="flex h-full items-center justify-center">
+                            <AddIcon />
+                        </span>
                     </button>
                     {showCalculatorButton ? (
                         <button
