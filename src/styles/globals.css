@@ -34,3 +34,142 @@ a {
 * {
   box-sizing: border-box;
 }
+
+@keyframes score-progress-shimmer {
+  0% {
+    transform: translateX(-20%) scaleX(0.8);
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: translateX(180%) scaleX(1.15);
+    opacity: 0;
+  }
+}
+
+@keyframes score-progress-burn {
+  0%,
+  100% {
+    transform: translateY(-50%) scale(0.9);
+    filter: brightness(1);
+    opacity: 0.75;
+  }
+
+  50% {
+    transform: translateY(-50%) scale(1.04);
+    filter: brightness(1.12);
+    opacity: 1;
+  }
+}
+
+@keyframes score-progress-ash-drift {
+  0% {
+    transform: translate3d(0, -50%, 0) scale(0.8);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 0.95;
+  }
+
+  45% {
+    transform: translate3d(0.45rem, -70%, 0) scale(1);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: translate3d(1.8rem, -115%, 0) scale(0.45);
+    opacity: 0;
+  }
+}
+
+@keyframes score-progress-ash-drift-alt {
+  0% {
+    transform: translate3d(0, -50%, 0) scale(0.85);
+    opacity: 0;
+  }
+
+  12% {
+    opacity: 0.85;
+  }
+
+  55% {
+    transform: translate3d(0.7rem, -25%, 0) scale(0.95);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: translate3d(2.1rem, -5%, 0) scale(0.35);
+    opacity: 0;
+  }
+}
+
+.score-progress-fill {
+  position: relative;
+  overflow: visible;
+}
+
+.score-progress-fill::before {
+  content: "";
+  position: absolute;
+  inset: -30% auto -30% -10%;
+  width: 38%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 196, 114, 0),
+    rgba(255, 227, 168, 0.18),
+    rgba(255, 255, 255, 0.62),
+    rgba(255, 184, 77, 0)
+  );
+  mix-blend-mode: screen;
+  animation: score-progress-shimmer 1.8s linear infinite;
+}
+
+.score-progress-ash {
+  position: absolute;
+  top: 50%;
+  right: -0.05rem;
+  width: 2.8rem;
+  height: 1.6rem;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.score-progress-ash::before,
+.score-progress-ash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  opacity: 0;
+}
+
+.score-progress-ash::before {
+  background-image:
+    radial-gradient(circle, rgba(255, 235, 190, 0.92) 0 18%, rgba(255, 235, 190, 0) 19%),
+    radial-gradient(circle, rgba(255, 193, 122, 0.7) 0 20%, rgba(255, 193, 122, 0) 21%),
+    radial-gradient(circle, rgba(164, 176, 190, 0.75) 0 16%, rgba(164, 176, 190, 0) 17%),
+    radial-gradient(circle, rgba(255, 148, 82, 0.72) 0 14%, rgba(255, 148, 82, 0) 15%);
+  background-size: 0.45rem 0.45rem, 0.34rem 0.34rem, 0.3rem 0.3rem, 0.25rem 0.25rem;
+  background-position: 0.1rem 0.75rem, 0.5rem 0.35rem, 0.9rem 0.95rem, 0.2rem 0.1rem;
+  animation: score-progress-ash-drift 1.2s linear infinite;
+}
+
+.score-progress-ash::after {
+  background-image:
+    radial-gradient(circle, rgba(226, 233, 238, 0.85) 0 18%, rgba(226, 233, 238, 0) 19%),
+    radial-gradient(circle, rgba(255, 213, 146, 0.76) 0 15%, rgba(255, 213, 146, 0) 16%),
+    radial-gradient(circle, rgba(149, 159, 173, 0.72) 0 18%, rgba(149, 159, 173, 0) 19%),
+    radial-gradient(circle, rgba(255, 167, 103, 0.65) 0 14%, rgba(255, 167, 103, 0) 15%);
+  background-size: 0.28rem 0.28rem, 0.36rem 0.36rem, 0.22rem 0.22rem, 0.24rem 0.24rem;
+  background-position: 0.15rem 0.95rem, 0.7rem 0.6rem, 1rem 0.15rem, 0.4rem 0.25rem;
+  animation: score-progress-ash-drift-alt 1.45s linear infinite;
+}

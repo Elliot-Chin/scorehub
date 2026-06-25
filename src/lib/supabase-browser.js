@@ -1,7 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
 export const DISPLAY_NAME_STORAGE_KEY = "game-scorer.display-name";
-const LAST_ACTIVE_SYNC_KEY = "game-scorer.last-active-sync";
 const ACTIVITY_SYNC_INTERVAL_MS = 60 * 1000;
 const ROOM_ACTIVITY_SYNC_INTERVAL_MS = 15 * 1000;
 const ROOM_CODE_LENGTH = 4;
@@ -9,6 +8,7 @@ const ROOM_CODE_LENGTH = 4;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 let authOperationQueue = Promise.resolve();
+let lastActivitySyncedAt = 0;
 
 function getStorageValue(key) {
     if (typeof window === "undefined") {
@@ -43,6 +43,18 @@ function removeStorageValue(key) {
         window.localStorage.removeItem(key);
     } catch {
         // Storage can be unavailable in private mode or restricted webviews.
+    }
+}
+
+function getStorageKeys() {
+    if (typeof window === "undefined") {
+        return [];
+    }
+
+    try {
+        return Object.keys(window.localStorage);
+    } catch {
+        return [];
     }
 }
 
@@ -81,11 +93,15 @@ function canSyncActivity(force) {
         return true;
     }
 
-    return hasIntervalElapsed(LAST_ACTIVE_SYNC_KEY, ACTIVITY_SYNC_INTERVAL_MS);
+    if (!Number.isFinite(lastActivitySyncedAt) || lastActivitySyncedAt <= 0) {
+        return true;
+    }
+
+    return Date.now() - lastActivitySyncedAt >= ACTIVITY_SYNC_INTERVAL_MS;
 }
 
 function rememberActivitySync() {
-    setStorageValue(LAST_ACTIVE_SYNC_KEY, String(Date.now()));
+    lastActivitySyncedAt = Date.now();
 }
 
 function getRoomActivitySyncKey(roomCode, userId) {
@@ -1047,4 +1063,25 @@ export function writeStoredJson(key, value) {
 
 export function clearStoredValue(key) {
     removeStorageValue(key);
+}
+
+export function clearStoredValuesByPrefix(prefixes, options = {}) {
+    const normalizedPrefixes = Array.isArray(prefixes)
+        ? prefixes.filter(Boolean)
+        : [prefixes].filter(Boolean);
+    const keepKeys = new Set(Array.isArray(options.keepKeys) ? options.keepKeys : []);
+
+    if (!normalizedPrefixes.length) {
+        return;
+    }
+
+    for (const key of getStorageKeys()) {
+        if (keepKeys.has(key)) {
+            continue;
+        }
+
+        if (normalizedPrefixes.some((prefix) => key.startsWith(prefix))) {
+            removeStorageValue(key);
+        }
+    }
 }
